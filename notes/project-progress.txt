@@ -1,0 +1,773 @@
+Script to concatenate directory
+find . -name "*.py" -type f | while read file; do
+  echo "=== $file ===" >> all_text.txt
+  cat "$file" >> all_text.txt
+  echo -e "\n" >> all_text.txt
+done
+
+Script to concatenate directory
+find . -name "*" -type f | while read file; do
+  echo "=== $file ===" >> all_text.txt
+  cat "$file" >> all_text.txt
+  echo -e "\n" >> all_text.txt
+done
+
+I am working on a project focused on event detection in pCLAMP electrophysiological data, 
+where most events last between 2 to 5 milliseconds, with a few extending to 7 milliseconds. 
+I have abf data in pA over time for MINIS events. The data is extremely noisy and the event amplitudes 
+can vary from lower than, greater than, or equal to noise. However, the events follow a consistent 
+pattern characterized by a sharp initial drop followed by a slow, logarithmic decay back to the baseline. 
+This can be determined visually, so I made a CNN to detect MINIS events.
+
+Training segments
+├── metadata.csv
+├── segments.npy
+├── test
+│   ├── test_metadata.csv
+│   └── test_segments.npy
+├── train
+│   ├── train_metadata.csv
+│   └── train_segments.npy
+└── val
+    ├── val_metadata.csv
+    └── val_segments.npy
+
+metadata.csv
+Label,Event ID,Event Start Time,Event End Time,Segment Start Time,Segment End Time,File Name
+1,C57_2021_07_26_0003_event_207.0,1200.0999,1200.12005,1200.02995,1200.09995,C57_2021_07_26_0003
+1,C57_2021_07_26_0003_event_207.0,1200.0999,1200.12005,1200.02995,1200.09995,C57_2021_07_26_0003
+1,C57_2021_07_26_0003_event_207.0,1200.0999,1200.12005,1200.02995,1200.09995,C57_2021_07_26_0003
+1,C57_2021_07_26_0003_event_207.0,1200.0999,1200.12005,1200.02995,1200.09995,C57_2021_07_26_0003
+0,,,,238.1345,238.2045,C57_2022_08_29_0002
+0,,,,387.38225,387.45225,C57_2022_08_29_0002
+0,,,,1003.27475,1003.34475,C57_2022_08_29_0002
+0,,,,765.817,765.887,C57_2022_08_29_0002
+
+"""
+event_extraction.py
+
+Description:
+    This script extracts event and non-event segments from preprocessed electrophysiological data 
+    stored in .npy files. The extracted segments and 
+    their metadata are saved in a uniquely named directory based on the extraction timestamp. 
+
+    Modify the preprocessed_dir parameter to specify the directory containing preprocessed data.
+
+Example Usage:
+    # Extract events from a specific preprocessed directory
+    python -m scripts.event_extraction.event_extraction
+
+    # To process a different directory, modify the preprocessed_dir parameter as needed.
+
+Output:
+    - segments.npy: A NumPy array containing all extracted event and non-event segments.
+    - metadata.csv: A CSV file containing metadata for each extracted segment.
+    - These files are saved in data/processed/segments/segments_{timestamp}/.
+    - Additionally, the dataset is split into train, val, and test subdirectories within the segments directory.
+
+Notes:
+    - Ensure that each preprocessed .npy file has a corresponding label .csv file located in data/labels/c57-labelled-data/.
+    - The script assumes that the label files are named as {trace_name}_labels.csv, where {trace_name} matches the preprocessed file name.
+    - The segment_size parameter defines the number of samples per segment and can be adjusted as needed.
+    - The script generates multiple augmentations for each event segment to increase dataset variability.
+    - Non-event segments are extracted to maintain a semi-balanced ratio (e.g., 1:2 for event:non-event in training sets).
+
+Dependencies:
+    - numpy
+    - pandas
+    - scikit-learn
+    - argparse
+    - data_splitting.py (script)
+
+Example Output Directory:
+    data/processed/segments/segments_20250111_123456/
+"""
+
+import os
+import numpy as np
+import pandas as pd
+import random
+from datetime import datetime
+import uuid
+
+def load_labels(label_file):
+    """Load labels CSV and return events with Start Time and End Time."""
+    df = pd.read_csv(label_file)
+    # Extract relevant columns and drop rows with NaN values
+    events = df[['Event ID', 'Start Time', 'End Time']].dropna()
+    return events
+
+def extract_event_segments(trace_data, sampling_rate, events, segment_size_samples, num_augmentations=5, trace_name=''):
+    """Extract event segments from trace_data."""
+    event_segments = []
+    event_metadata = []
+
+    total_samples = len(trace_data)
+    for _, event in events.iterrows():
+        original_event_id = event['Event ID']
+        # Create a unique Event ID by combining with trace_name
+        unique_event_id = f"{trace_name}_event_{original_event_id}"
+        event_start_time = event['Start Time']  # in seconds
+        event_end_time = event['End Time']      # in seconds
+
+        # Convert event times to sample indices
+        event_start_sample = int(event_start_time * sampling_rate)
+        event_end_sample = int(event_end_time * sampling_rate)
+        event_num_samples = event_end_sample - event_start_sample
+
+        if event_num_samples > segment_size_samples:
+            # Skip events longer than the segment size
+            continue
+
+        # Calculate extra samples needed to reach segment size
+        extra_samples_needed = segment_size_samples - event_num_samples
+
+        # Generating multiple augmented segments per event
+        for _ in range(num_augmentations):
+            num_samples_before = random.randint(0, extra_samples_needed)
+            num_samples_after = extra_samples_needed - num_samples_before
+
+            segment_start_sample = max(event_start_sample - num_samples_before, 0)
+            segment_end_sample = min(event_end_sample + num_samples_after, total_samples)
+
+            # Adjust if segment is smaller than desired size
+            actual_segment_size = segment_end_sample - segment_start_sample
+            if actual_segment_size < segment_size_samples:
+                if segment_start_sample == 0:
+                    segment_end_sample = min(segment_start_sample + segment_size_samples, total_samples)
+                elif segment_end_sample == total_samples:
+                    segment_start_sample = max(segment_end_sample - segment_size_samples, 0)
+
+            # Extracting only the Signal (assuming Trace Data has [Time, Signal])
+            segment_data = trace_data[segment_start_sample:segment_end_sample, 1]
+
+            if len(segment_data) != segment_size_samples:
+                continue
+
+            event_segments.append(segment_data)
+            event_metadata.append({
+                'Label': 1,
+                'Event ID': unique_event_id,
+                'Event Start Time': event_start_time,
+                'Event End Time': event_end_time,
+                'Segment Start Time': segment_start_sample / sampling_rate,
+                'Segment End Time': segment_end_sample / sampling_rate,
+                'File Name': trace_name
+            })
+
+    return event_segments, event_metadata
+
+def extract_non_event_segments(trace_data, sampling_rate, events, segment_size_samples, num_non_event_segments, trace_name=''):
+    """Extract non-event segments from trace_data."""
+    non_event_segments = []
+    non_event_metadata = []
+
+    total_samples = len(trace_data)
+
+    # Create a list of event intervals
+    event_intervals = [(int(e['Start Time'] * sampling_rate), int(e['End Time'] * sampling_rate)) for _, e in events.iterrows()]
+
+    def is_overlapping(start, end):
+        return any(start < e_end and end > e_start for e_start, e_end in event_intervals)
+
+    attempts = 0
+    max_attempts = num_non_event_segments * 10
+
+    while len(non_event_segments) < num_non_event_segments and attempts < max_attempts:
+        attempts += 1
+        segment_start_sample = random.randint(0, total_samples - segment_size_samples)
+        segment_end_sample = segment_start_sample + segment_size_samples
+
+        if not is_overlapping(segment_start_sample, segment_end_sample):
+            # Extract only the Signal (assuming Trace Data has [Time, Signal])
+            segment_data = trace_data[segment_start_sample:segment_end_sample, 1]  # Extract Signal only
+
+            non_event_segments.append(segment_data)
+            non_event_metadata.append({
+                'Label': 0,
+                'Event ID': None,
+                'Event Start Time': None,
+                'Event End Time': None,
+                'Segment Start Time': segment_start_sample / sampling_rate,
+                'Segment End Time': segment_end_sample / sampling_rate,
+                'File Name': trace_name
+            })
+
+    return non_event_segments, non_event_metadata
+
+def main():
+    # Parameters
+    segment_size = 1400  # Default segment size
+    sampling_rate = 20000  # Sampling rate in Hz
+
+    # Directories
+    preprocessed_dir = 'data/processed/preprocessed/preprocessed_20250111_201734_98741d'
+    labels_dir = 'data/labels/c57-labelled-data'
+    segments_dir = 'data/processed/segments'
+
+    # Create a unique subdirectory for segments
+    extraction_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    segments_subdir = os.path.join(segments_dir, f'segments_{extraction_timestamp}')
+    os.makedirs(segments_subdir, exist_ok=True)
+
+    all_event_segments = []
+    all_event_metadata = []
+    all_non_event_segments = []
+    all_non_event_metadata = []
+
+    # Process each preprocessed file
+    for filename in os.listdir(preprocessed_dir):
+        if filename.endswith('_preprocessed.npy'):
+            trace_name = filename[:-len('_preprocessed.npy')]
+            preprocessed_file = os.path.join(preprocessed_dir, filename)
+            label_file = os.path.join(labels_dir, f'{trace_name}_labels.csv')
+
+            if not os.path.isfile(label_file):
+                print(f'Label file for {trace_name} not found.')
+                continue
+
+            trace_data = np.load(preprocessed_file)
+
+            # print(f"Loaded trace data for {trace_name}: shape {trace_data.shape}")
+
+            events = load_labels(label_file)
+
+            event_segments, event_metadata = extract_event_segments(
+                trace_data, sampling_rate, events, segment_size, trace_name=trace_name
+            )
+
+            all_event_segments.extend(event_segments)
+            all_event_metadata.extend(event_metadata)
+
+            num_non_event_segments = len(event_segments) * 2  # Semi-balanced ratio
+
+            non_event_segments, non_event_metadata = extract_non_event_segments(
+                trace_data, sampling_rate, events, segment_size, num_non_event_segments, trace_name=trace_name
+            )
+
+            all_non_event_segments.extend(non_event_segments)
+            all_non_event_metadata.extend(non_event_metadata)
+
+    # Combine segments and metadata
+    segments = np.array(all_event_segments + all_non_event_segments)
+    metadata = pd.DataFrame(all_event_metadata + all_non_event_metadata)
+
+    # Reorder columns as specified
+    metadata = metadata[['Label', 'Event ID', 'Event Start Time', 'Event End Time', 
+                         'Segment Start Time', 'Segment End Time', 'File Name']]
+
+    # Save segments and metadata
+    np.save(os.path.join(segments_subdir, 'segments.npy'), segments)
+    metadata.to_csv(os.path.join(segments_subdir, 'metadata.csv'), index=False)
+
+    print(f"Saved segments.npy and metadata.csv to {segments_subdir}")
+
+    # Split data
+    import scripts.event_extraction.data_splitting as data_splitting
+    data_splitting.split_data(segments_subdir)
+
+if __name__ == '__main__':
+    main()
+
+"""
+data_splitting.py
+
+Description:
+    This script splits the extracted segments and their corresponding metadata into 
+    training, validation, and test datasets. It ensures that the splits are 
+    semi-balanced by maintaining specific ratios between event and non-event samples 
+    within each subset. The script utilizes scikit-learn's train_test_split for 
+    partitioning.
+
+    The purpose of this script is to be used in event_extraction.py
+
+Example Usage:
+    # Split data using the default latest segments directory
+    python scripts/data_splitting.py
+
+    # Specify a particular segments directory
+    python scripts/data_splitting.py --segments_dir data/processed/segments/segments_20241128_125711/
+
+Output:
+    - train_segments.npy and train_metadata.csv in data/processed/segments/segments_{timestamp}/train/
+    - val_segments.npy and val_metadata.csv in data/processed/segments/segments_{timestamp}/val/
+    - test_segments.npy and test_metadata.csv in data/processed/segments/segments_{timestamp}/test/
+
+Notes:
+    - If no segments_dir is provided via command-line arguments, the script defaults to the latest 
+      segments subdirectory based on timestamp within data/processed/segments/.
+    - The script maintains a semi-balanced ratio of event to non-event samples:
+        - Training set: 1:2 (event:non-event)
+        - Validation set: 1:20 (event:non-event)
+        - Test set: 1:20 (event:non-event)
+    - Ensure that the segments.npy and metadata.csv files exist in the specified segments_dir.
+    - The script uses a random state for reproducibility.
+
+Dependencies:
+    - numpy
+    - pandas
+    - scikit-learn
+    - argparse
+
+Example Output Directory Structure:
+    data/processed/segments/segments_20250111_123456/
+"""
+
+# File: scripts/data_splitting.py
+
+import os
+import numpy as np
+import pandas as pd
+import random
+from sklearn.model_selection import train_test_split
+
+def split_data(segments_dir, segment_size=1400):
+    """Split the data into training, validation, and test sets."""
+    # Load data
+    segments = np.load(os.path.join(segments_dir, 'segments.npy'))
+    metadata_df = pd.read_csv(os.path.join(segments_dir, 'metadata.csv'))
+
+    # Add index to metadata
+    metadata_df = metadata_df.reset_index().rename(columns={'index': 'Index'})
+
+    # Separate event and non-event indices
+    event_indices = metadata_df[metadata_df['Label'] == 1]['Index'].tolist()
+    non_event_indices = metadata_df[metadata_df['Label'] == 0]['Index'].tolist()
+
+    # Define proportions
+    train_prop = 0.7
+    val_prop = 0.15
+    test_prop = 0.15
+
+    # Split indices for events
+    event_train_idx, event_temp_idx = train_test_split(event_indices, train_size=train_prop, random_state=42)
+    event_val_idx, event_test_idx = train_test_split(event_temp_idx, test_size=test_prop/(test_prop + val_prop), random_state=42)
+
+    # Split indices for non-events
+    non_event_train_idx, non_event_temp_idx = train_test_split(non_event_indices, train_size=train_prop, random_state=42)
+    non_event_val_idx, non_event_test_idx = train_test_split(non_event_temp_idx, test_size=test_prop/(test_prop + val_prop), random_state=42)
+
+    # Adjust ratios
+    # Training set: 1:2 (event:non-event)
+    num_events_train = len(event_train_idx)
+    desired_non_events_train = num_events_train * 2
+    if len(non_event_train_idx) > desired_non_events_train:
+        non_event_train_idx = random.sample(non_event_train_idx, desired_non_events_train)
+
+    # Validation set: 1:20 (event:non-event)
+    num_events_val = len(event_val_idx)
+    desired_non_events_val = num_events_val * 20
+    if len(non_event_val_idx) > desired_non_events_val:
+        non_event_val_idx = random.sample(non_event_val_idx, desired_non_events_val)
+
+    # Test set: 1:20 (event:non-event)
+    num_events_test = len(event_test_idx)
+    desired_non_events_test = num_events_test * 20
+    if len(non_event_test_idx) > desired_non_events_test:
+        non_event_test_idx = random.sample(non_event_test_idx, desired_non_events_test)
+
+    # Combine indices
+    train_indices = event_train_idx + non_event_train_idx
+    val_indices = event_val_idx + non_event_val_idx
+    test_indices = event_test_idx + non_event_test_idx
+
+    # Shuffle indices
+    random.shuffle(train_indices)
+    random.shuffle(val_indices)
+    random.shuffle(test_indices)
+
+    # Extract data
+    train_segments = segments[train_indices]
+    train_metadata = metadata_df.loc[train_indices]
+
+    val_segments = segments[val_indices]
+    val_metadata = metadata_df.loc[val_indices]
+
+    test_segments = segments[test_indices]
+    test_metadata = metadata_df.loc[test_indices]
+
+    # Define dataset paths
+    for dataset, name in zip(
+        [(train_segments, train_metadata), (val_segments, val_metadata), (test_segments, test_metadata)],
+        ['train', 'val', 'test']
+    ):
+        dir_path = os.path.join(segments_dir, name)
+        os.makedirs(dir_path, exist_ok=True)
+        np.save(os.path.join(dir_path, f'{name}_segments.npy'), dataset[0])
+        dataset[1].to_csv(os.path.join(dir_path, f'{name}_metadata.csv'), index=False)
+
+    print("Data splitting completed.")
+
+if __name__ == '__main__':
+    import sys
+    if len(sys.argv) > 1:
+        segments_dir = sys.argv[1]
+    else:
+        # Default to the latest segments folder if not provided
+        base_segments_dir = 'data/processed/segments'
+        subdirs = [d for d in os.listdir(base_segments_dir) if os.path.isdir(os.path.join(base_segments_dir, d))]
+        if not subdirs:
+            print("No segments subdirectories found.")
+            sys.exit(1)
+        # Assume the latest folder based on timestamp
+        subdirs.sort()
+        segments_dir = os.path.join(base_segments_dir, subdirs[-1])
+    split_data(segments_dir)
+
+Google Colab Code:
+# Purpose: Train a 1D Convolutional Neural Network (CNN) on electrophysiological signal segments for binary classification of event and non-event categories.
+# Notes: 
+# - This script is designed to run on Google Colab with GPU acceleration.
+# - Notes were generated with the help of GitHub Copilot and ChatGPT.
+
+# Set up
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+# !pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu117
+!pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
+
+# Defining Paths
+# !nvcc --version
+
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+
+base_dir = '/content/drive/My Drive/Electrophysiology_Project'
+
+segments_dir = os.path.join(base_dir, 'segments_20241129_233026')
+
+# Paths to training, validation, and test sets
+train_segments_path = os.path.join(segments_dir, 'train', 'train_segments.npy')
+train_metadata_path = os.path.join(segments_dir, 'train', 'train_metadata.csv')
+
+val_segments_path = os.path.join(segments_dir, 'val', 'val_segments.npy')
+val_metadata_path = os.path.join(segments_dir, 'val', 'val_metadata.csv')
+
+test_segments_path = os.path.join(segments_dir, 'test', 'test_segments.npy')
+test_metadata_path = os.path.join(segments_dir, 'test', 'test_metadata.csv')
+
+# Loading the data
+X_train = np.load(train_segments_path)
+y_train = pd.read_csv(train_metadata_path)['Label'].values
+
+X_val = np.load(val_segments_path)
+y_val = pd.read_csv(val_metadata_path)['Label'].values
+
+X_test = np.load(test_segments_path)
+y_test = pd.read_csv(test_metadata_path)['Label'].values
+
+# Verifying shapes
+print(f"Training set: {X_train.shape}, Validation set: {X_val.shape}, Test set: {X_test.shape}")
+
+# Defining Dataset Class and Model
+#
+# This script sets up a PyTorch dataset and defines a 1D Convolutional Neural Network (CNN)
+# for binary classification of electrophysiological signal segments into event and non-event categories.
+#
+# **Key Components:**
+# 1. **SignalDataset Class:**
+#    - Inherits from PyTorch's Dataset class to handle loading of signal segments and their corresponding labels.
+#    - **Adding a Channel Dimension:** The __getitem__ method adds an extra dimension to each segment to represent the channel,
+#      transforming the data shape from (sequence_length,) to (1, sequence_length). This is essential for the CNN's
+#      convolutional layers which expect input with channel information.
+#
+# 2. **CNN1D Model Class:**
+#    - Defines a sequential 1D CNN architecture tailored for processing time-series data.
+#    - **Convolutional Layers:** Three convolutional layers with increasing filter sizes capture hierarchical features
+#      from the input signals.
+#    - **Batch Normalization:** Applied after each convolution to stabilize and accelerate training by normalizing
+#      layer inputs.
+#    - **Pooling Layers:** Max pooling with a kernel size of 2 reduces the temporal dimension, retaining the most
+#      significant features and reducing computational load. However, given that events are 2-5 ms (40-100 samples)
+#      at a 20 kHz sampling rate, aggressive pooling (3 layers) may lead to loss of temporal resolution, making it
+#      challenging to accurately detect short-duration events. Consider reducing the number of pooling layers or
+#      adjusting the pooling strategy to better preserve event characteristics.
+#    - **Flattening:** The output from the convolutional layers is flattened into a one-dimensional vector to interface
+#      with the fully connected layers.
+#    - **Fully Connected Layers:** A dense layer with ReLU activation followed by a dropout layer helps in learning
+#      complex patterns and preventing overfitting. The final dense layer with sigmoid activation outputs probabilities
+#      for binary classification.
+#
+# **Architectural Decisions:**
+# - **Channel Dimension Addition:** Ensures compatibility with CNN layers by providing necessary channel information.
+# - **Max Pooling:** Efficiently downsamples the data, capturing essential features while maintaining computational efficiency.
+#   However, with events of 2-5 ms, pooling may reduce the ability to detect these events accurately.
+# - **Flattening Before Dense Layers:** Converts multi-dimensional feature maps into a format suitable for classification layers.
+# - **Dropout Layer:** Regularizes the model to enhance generalization and prevent overfitting, especially important in
+#   datasets with class imbalance.
+
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+
+class SignalDataset(Dataset):
+    def __init__(self, segments, labels):
+        self.segments = torch.tensor(segments, dtype=torch.float32)
+        self.labels = torch.tensor(labels, dtype=torch.float32)
+
+    def __len__(self):
+        return len(self.segments)
+    def __getitem__(self, idx):
+        # Added a channel dimension for CNN (channels=1)
+        return self.segments[idx].unsqueeze(0), self.labels[idx]
+
+class CNN1D(nn.Module):
+    def __init__(self, input_length):
+        super(CNN1D, self).__init__()
+        self.conv1 = nn.Conv1d(in_channels=1, out_channels=32, kernel_size=3, 
+                               padding=1)
+        self.bn1 = nn.BatchNorm1d(32)
+        self.pool1 = nn.MaxPool1d(kernel_size=2)
+
+        self.conv2 = nn.Conv1d(32, 64, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm1d(64)
+        self.pool2 = nn.MaxPool1d(kernel_size=2)
+
+        # Length after pooling
+        self.pool_output_length = input_length // (2 ** 2)
+
+        self.fc1 = nn.Linear(64 * self.pool_output_length, 64)
+        self.dropout = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(64, 1)  # Binary classification
+
+    def forward(self, x):
+        x = self.pool1(torch.relu(self.bn1(self.conv1(x))))
+        x = self.pool2(torch.relu(self.bn2(self.conv2(x))))
+        x = x.view(x.size(0), -1)  # Flatten
+        x = torch.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = torch.sigmoid(self.fc2(x))
+        return x
+
+# CNN Parameter Explanation and Methodology From ChatGPT:
+# 1. **In Channels**: Number of input channels, typically set to 1 for single-channel data like grayscale images or 1D signals.
+#    - Here, in_channels=1 because each segment is a single-channel signal.
+# 2. **Out Channels**: Number of feature maps (filters) learned by the convolutional layer.
+#    - Starts with a smaller value (e.g., 32) and increases in subsequent layers (e.g., 64, 128) to capture progressively more complex patterns.
+#    - Choosing more out_channels increases the model's capacity but also its complexity and computation cost.
+# 3. **Kernel Size**: Size of the filter sliding over the data.
+#    - A smaller kernel (e.g., 3) captures local features, like small spikes or dips in the signal.
+#    - Larger kernels capture broader features but may miss finer details.
+#    - Typically starts small and can be increased experimentally.
+# 4. **Padding**: Adds extra values (usually zeros) around the edges to preserve the input size after convolution.
+#    - Here, padding=1 ensures the output size matches the input size for a kernel size of 3, simplifying model design.
+#
+# **Optimizing Parameters**:
+# - **In Channels**: Fixed based on input data (e.g., 1 for single-channel signals).
+# - **Out Channels**: Experimentally tune; start small (e.g., 32) and increase to balance feature extraction and computation cost.
+# - **Kernel Size**: Test different sizes (e.g., 3, 5, 7) and evaluate performance on validation data.
+# - **Padding**: Typically use same padding to maintain input size, unless shrinking the output is desired for efficiency.
+
+# Creating Data Loaders
+# - The SignalDataset instances wrap the training, validation, and test data, allowing them to be accessed in a uniform way.
+# - DataLoaders handle batching, shuffling, and parallel data loading during training and evaluation:
+#   1. train_loader: Provides batches of 64 samples from train_dataset, shuffling the data to improve training generalization.
+#   2. val_loader and test_loader: Provide non-shuffled batches for evaluation, maintaining data order for consistency.
+#   3. num_workers: Specifies the number of worker threads for loading data, improving efficiency during training.
+
+train_dataset = SignalDataset(X_train, y_train)
+val_dataset = SignalDataset(X_val, y_val)
+test_dataset = SignalDataset(X_test, y_test)
+
+train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=2)
+val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False, num_workers=2)
+test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=2)
+
+# Preparation for Training and Validation Loops
+
+# GPU check
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f'Using device: {device}')
+
+# Initialize model
+input_length = X_train.shape[1]  # e.g., 1400
+model = CNN1D(input_length=input_length).to(device)
+
+# Define loss and optimizer
+criterion = nn.BCELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# Define Training and Validation Loops:
+# - Iterate over a set number of epochs to train the CNN.
+# - **Training Phase**:
+#     - Set the model to training mode.
+#     - Loop through batches from the training DataLoader:
+#         - Move data to the appropriate device (CPU/GPU).
+#         - Perform forward pass, compute loss, perform backward pass, and update model weights.
+#         - Accumulate training loss and correct predictions for accuracy.
+# - **Validation Phase**:
+#     - Set the model to evaluation mode.
+#     - Loop through batches from the validation DataLoader without gradient computation:
+#         - Perform forward pass and compute loss.
+#         - Accumulate validation loss and correct predictions for accuracy.
+# - **Logging and Early Stopping**:
+#     - Record and print training and validation metrics each epoch.
+#     - Save the model if validation loss improves.
+#     - Stop training early if no improvement is seen for a specified number of epochs (patience).
+
+
+# Training parameters:
+# - num_epochs: Total number of training iterations over the dataset.
+# - patience: Number of epochs to wait for validation loss improvement before stopping (early stopping).
+# - best_val_loss: Tracks the lowest validation loss seen so far.
+# - trigger_times: Counts epochs without improvement to enforce early stopping.
+
+num_epochs = 50
+patience = 5
+best_val_loss = float('inf')
+trigger_times = 0
+
+# History for plotting
+history = {
+    'train_loss': [],
+    'val_loss': [],
+    'train_acc': [],
+    'val_acc': []
+}
+
+# Training loop
+for epoch in range(1, num_epochs + 1):
+    # Training phase
+    model.train()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+
+    for inputs, labels in train_loader:
+        inputs = inputs.to(device)
+        labels = labels.to(device).unsqueeze(1)
+
+        # Zero the parameter gradients
+        optimizer.zero_grad()
+
+        # Forward pass
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+
+        # Backward pass and optimize
+        loss.backward()
+        optimizer.step()
+
+        # Statistics
+        running_loss += loss.item() * inputs.size(0)
+        preds = (outputs > 0.5).float()
+        correct += (preds == labels).sum().item()
+        total += labels.size(0)
+
+    epoch_loss = running_loss / total
+    epoch_acc = correct / total
+
+    # Validation phase
+    model.eval()
+    val_running_loss = 0.0
+    val_correct = 0
+    val_total = 0
+
+    with torch.no_grad():
+        for inputs, labels in val_loader:
+            inputs = inputs.to(device)
+            labels = labels.to(device).unsqueeze(1)
+
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+
+            val_running_loss += loss.item() * inputs.size(0)
+            preds = (outputs > 0.5).float()
+            val_correct += (preds == labels).sum().item()
+            val_total += labels.size(0)
+
+    val_epoch_loss = val_running_loss / val_total
+    val_epoch_acc = val_correct / val_total
+
+    # History saving
+    history['train_loss'].append(epoch_loss)
+    history['train_acc'].append(epoch_acc)
+    history['val_loss'].append(val_epoch_loss)
+    history['val_acc'].append(val_epoch_acc)
+
+    print(f'Epoch {epoch}/{num_epochs} - '
+          f'Train Loss: {epoch_loss:.4f} - Train Acc: {epoch_acc:.4f} - '
+          f'Val Loss: {val_epoch_loss:.4f} - Val Acc: {val_epoch_acc:.4f}')
+
+    # Early Stopping
+    if val_epoch_loss < best_val_loss:
+        best_val_loss = val_epoch_loss
+        trigger_times = 0
+        # Save the best model
+        torch.save(model.state_dict(), os.path.join(base_dir, 'models', 'saved_models', 'best_model.pth'))
+        print(f'Validation loss decreased. Saving model.')
+    else:
+        trigger_times += 1
+        print(f'No improvement in validation loss for {trigger_times} epoch(s).')
+        if trigger_times >= patience:
+            print('Early stopping!')
+            break
+
+# Evaluate on Test Set:
+# - Load the best saved model and switch to evaluation mode.
+# - Generate predictions for the test dataset.
+# - Compute and display classification metrics (precision, recall, F1-score).
+# - Create and save a confusion matrix to visualize performance.
+# - Save the final trained model for future use.
+
+
+# Load the best model
+model.load_state_dict(torch.load(os.path.join(base_dir, 'models', 'saved_models', 'best_model.pth')))
+model.eval()
+
+all_preds = []
+all_labels = []
+
+with torch.no_grad():
+    for inputs, labels in test_loader:
+        inputs = inputs.to(device)
+        labels = labels.to(device).unsqueeze(1)
+
+        outputs = model(inputs)
+        preds = (outputs > 0.5).float()
+
+        all_preds.extend(preds.cpu().numpy())
+        all_labels.extend(labels.cpu().numpy())
+
+all_preds = np.array(all_preds).flatten()
+all_labels = np.array(all_labels).flatten()
+
+# Classification Report
+from sklearn.metrics import classification_report, confusion_matrix
+
+print("\nClassification Report:")
+print(classification_report(all_labels, all_preds, target_names=['Non-Event', 'Event']))
+
+# Confusion Matrix
+cm = confusion_matrix(all_labels, all_preds)
+plt.figure(figsize=(6,5))
+plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+plt.title('Confusion Matrix')
+plt.colorbar()
+tick_marks = np.arange(2)
+plt.xticks(tick_marks, ['Non-Event', 'Event'], rotation=45)
+plt.yticks(tick_marks, ['Non-Event', 'Event'])
+
+fmt = 'd'
+thresh = cm.max() / 2.
+for i, j in np.ndindex(cm.shape):
+    plt.text(j, i, format(cm[i, j], fmt),
+             horizontalalignment="center",
+             color="white" if cm[i, j] > thresh else "black")
+
+plt.ylabel('True label')
+plt.xlabel('Predicted label')
+plt.tight_layout()
+plt.savefig(os.path.join(base_dir, 'models', 'saved_models', 'confusion_matrix.png'))
+plt.show()
+
+# Save the final model
+torch.save(model.state_dict(), os.path.join(base_dir, 'models', 'saved_models', 'final_model.pth'))
+print(f"Final model saved to {os.path.join(base_dir, 'models', 'saved_models', 'final_model.pth')}")
