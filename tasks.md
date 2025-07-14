@@ -148,11 +148,69 @@ from src.utils import get_project_root
 
 ### 1BB. Refactor Visualization Scripts to Use Project Root
 
+**Context from Sub-task 1BA Completion:**
+
+The verification scripts were successfully refactored with the following key learnings:
+
+- **✅ All verification scripts refactored**: `event_verification.py`, `count_correctly_found_events.py`, `run_extract_count_plot.py`, and `get_top_10_amplitudes.py` (already done)
+- **✅ Comprehensive testing completed**: All scripts work from project root, verification directory, and scripts directory
+- **✅ Subprocess calls working**: All subprocess calls use project root-based paths and execute correctly
+- **✅ Import pattern established**: All scripts use the proven import pattern for `src` imports
+- **✅ Cross-platform compatibility**: Path construction uses `os.path.join()` for robust handling
+
+**Implementation Challenges Encountered and Resolved:**
+
+1. **Project Root Detection Context**: The `get_project_root()` function works perfectly when called from script files, but may fail when called from `python -c` commands due to missing `__file__` context
+
+   - **Solution**: This is expected behavior - scripts should be tested as actual files, not via command line evaluation
+
+2. **Subprocess Path Resolution**: All subprocess calls now use absolute paths constructed from project root
+
+   - **Pattern**: `os.path.join(project_root, 'scripts', 'verification', script_name)`
+   - **Result**: Subprocess calls work regardless of where the parent script is executed from
+
+3. **Import Dependencies**: Scripts that import from `src` require the established import pattern
+   - **Pattern**: Add project root to `sys.path` before importing from `src`
+   - **Verification**: All imports work correctly from any directory
+
+**Sub-task 1BB Actions:**
+
 - Refactor all scripts in `scripts/visualization/` to use the project root utility.
 - Replace all fragile relative path logic with paths constructed from the project root.
 - Ensure all subprocess calls and sys.path modifications use the project root.
 - **VERIFICATION**: Test each refactored script to ensure it works correctly from its current location and from other locations within the project.
 - **VERIFICATION**: Verify that all file accesses (data loading, model loading, subprocess calls) work as expected after the refactor.
+
+**Key Implementation Notes for Visualization Scripts:**
+
+1. **Import Pattern**: Use the established pattern for any scripts that import from `src`:
+
+   ```python
+   # Add project root to path for imports
+   script_dir = os.path.dirname(os.path.abspath(__file__))
+   project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+   if project_root not in sys.path:
+       sys.path.insert(0, project_root)
+
+   from src.utils import get_project_root
+   ```
+
+2. **Testing Strategy**: Test each script immediately after refactoring:
+
+   - From project root: `python scripts/visualization/script_name.py --help`
+   - From scripts directory: `cd scripts && python visualization/script_name.py --help`
+   - From visualization directory: `cd scripts/visualization && python script_name.py --help`
+
+3. **Path Construction**: Use `os.path.join(project_root, 'data', 'labels', ...)` for all file paths
+
+4. **Subprocess Calls**: If any visualization scripts call other scripts, use project root-based paths:
+
+   ```python
+   project_root = get_project_root()
+   script_path = os.path.join(project_root, 'scripts', 'other_script.py')
+   ```
+
+5. **Error Handling**: If a script fails after refactoring, revert immediately to maintain working state
 
 ### 1BC. Refactor Model Event Extraction Scripts to Use Project Root
 
