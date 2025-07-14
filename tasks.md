@@ -61,7 +61,7 @@ All file accesses should then be constructed relative to this root, not the scri
 - **VERIFICATION**: Test the utility function from multiple script locations (e.g., `scripts/verification/`, `scripts/visualization/`, `src/`) to ensure it correctly identifies the project root in all cases.
 - **VERIFICATION**: Verify the function handles edge cases (e.g., when run from outside the project directory, when marker files are missing).
 
-### 1B. Refactor Scripts to Use Project Root for File Access
+### 1BA. Refactor Verification Scripts to Use Project Root
 
 **Context from Sub-task 1A Completion:**
 
@@ -97,12 +97,99 @@ The project root detection utility was successfully implemented with the followi
    - File paths: ✅ Works
    - Outside project: ✅ Correctly raises RuntimeError
 
-The utility is now ready for use in refactoring scripts to use project-root-based paths.
+**Context from Initial 1B Attempt:**
 
-**Sub-task 1B Actions:**
+**Critical Discovery - Import Path Management**: When refactoring scripts to use the project root utility, we discovered that scripts cannot directly import from `src` without first adding the project root to `sys.path`. This led to `ModuleNotFoundError: No module named 'src'` errors.
 
-- Update all scripts to import and use the project root utility.
-- Replace all fragile relative path logic with paths constructed from the project root (e.g., `os.path.join(get_project_root(), 'data', 'labels', ...)`).
+**Solution Pattern Established**: All scripts that need to import from `src` must include this pattern at the top:
+
+```python
+import os
+import sys
+
+# Add project root to path for imports
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from src.utils import get_project_root
+```
+
+**Testing Strategy Refined**: We learned that each script must be tested individually after refactoring to ensure:
+
+1. Project root detection works correctly
+2. File paths are resolved properly
+3. Imports from `src` succeed
+4. The script's core functionality still works
+
+**Partial Success Achieved**: Successfully refactored and tested:
+
+- ✅ `scripts/verification/get_top_10_amplitudes.py` - Works correctly
+- ✅ `scripts/visualization/plot_time_to_next_event_distribution.py` - Works correctly
+
+**Reversion Strategy**: Due to the large number of files and the need for careful testing, we reverted untested scripts back to their original state to avoid breaking functionality. This established the pattern of incremental refactoring with immediate verification.
+
+**Sub-task 1BA Actions:**
+
+- Refactor all scripts in `scripts/verification/` to use the project root utility.
+- Replace all fragile relative path logic with paths constructed from the project root.
+- Ensure all subprocess calls and sys.path modifications use the project root.
+- **VERIFICATION**: Test each refactored script to ensure it works correctly from its current location and from other locations within the project.
+- **VERIFICATION**: Verify that all file accesses (data loading, model loading, subprocess calls) work as expected after the refactor.
+
+**Key Implementation Notes for Future Subtasks:**
+
+1. **Import Pattern**: Always use the established import pattern for scripts that need `src` imports
+2. **Testing Approach**: Test each script immediately after refactoring, not in batch
+3. **Error Handling**: The project root detection works when `start_path='.'` is specified, but may fail from command line without explicit start path
+4. **Revert Strategy**: If a script fails after refactoring, revert it immediately to maintain working state
+5. **Path Construction**: Use `os.path.join(project_root, 'data', 'labels', ...)` instead of string concatenation for robust path handling
+
+### 1BB. Refactor Visualization Scripts to Use Project Root
+
+- Refactor all scripts in `scripts/visualization/` to use the project root utility.
+- Replace all fragile relative path logic with paths constructed from the project root.
+- Ensure all subprocess calls and sys.path modifications use the project root.
+- **VERIFICATION**: Test each refactored script to ensure it works correctly from its current location and from other locations within the project.
+- **VERIFICATION**: Verify that all file accesses (data loading, model loading, subprocess calls) work as expected after the refactor.
+
+### 1BC. Refactor Model Event Extraction Scripts to Use Project Root
+
+- Refactor all scripts in `scripts/model_event_extraction/` to use the project root utility.
+- Replace all fragile relative path logic with paths constructed from the project root.
+- Ensure all subprocess calls and sys.path modifications use the project root.
+- **VERIFICATION**: Test each refactored script to ensure it works correctly from its current location and from other locations within the project.
+- **VERIFICATION**: Verify that all file accesses (data loading, model loading, subprocess calls) work as expected after the refactor.
+
+### 1BD. Refactor Preprocessing Scripts to Use Project Root
+
+- Refactor all scripts in `scripts/preprocessing/` to use the project root utility.
+- Replace all fragile relative path logic with paths constructed from the project root.
+- Ensure all subprocess calls and sys.path modifications use the project root.
+- **VERIFICATION**: Test each refactored script to ensure it works correctly from its current location and from other locations within the project.
+- **VERIFICATION**: Verify that all file accesses (data loading, model loading, subprocess calls) work as expected after the refactor.
+
+### 1BE. Refactor Analysis Scripts to Use Project Root
+
+- Refactor all scripts in `scripts/analysis/` and `scripts/analysis/utils/` to use the project root utility.
+- Replace all fragile relative path logic with paths constructed from the project root.
+- Ensure all subprocess calls and sys.path modifications use the project root.
+- **VERIFICATION**: Test each refactored script to ensure it works correctly from its current location and from other locations within the project.
+- **VERIFICATION**: Verify that all file accesses (data loading, model loading, subprocess calls) work as expected after the refactor.
+
+### 1BF. Refactor Training Scripts to Use Project Root
+
+- Refactor all scripts in `scripts/training_scripts/` to use the project root utility.
+- Replace all fragile relative path logic with paths constructed from the project root.
+- Ensure all subprocess calls and sys.path modifications use the project root.
+- **VERIFICATION**: Test each refactored script to ensure it works correctly from its current location and from other locations within the project.
+- **VERIFICATION**: Verify that all file accesses (data loading, model loading, subprocess calls) work as expected after the refactor.
+
+### 1BG. Refactor Preprocessing Test Scripts to Use Project Root
+
+- Refactor all scripts in `scripts/preprocessing_tests/` and its subdirectories to use the project root utility.
+- Replace all fragile relative path logic with paths constructed from the project root.
 - Ensure all subprocess calls and sys.path modifications use the project root.
 - **VERIFICATION**: Test each refactored script to ensure it works correctly from its current location and from other locations within the project.
 - **VERIFICATION**: Verify that all file accesses (data loading, model loading, subprocess calls) work as expected after the refactor.
