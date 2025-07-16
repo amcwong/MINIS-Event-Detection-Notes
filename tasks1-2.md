@@ -23,7 +23,7 @@
 
 _Each sub-task is actionable and can be completed in a single LLM prompt, but the overall task is best done in sequence for maintainability and reliability. Each sub-task must be fully verified before moving to the next one._
 
-### Other Notes:
+### IMPORTANT Notes:
 
 - When updating any documentation (including sub-tasks) about the information about a completed sub-task, ensure to include all errors that occured, what their problem was, and how they were fixed.
 
@@ -1033,7 +1033,89 @@ This framework will enable systematic model comparison, parameter optimization, 
 - **Export Capabilities**: Easy export of analysis results and visualizations
 - **Future Integration**: Framework ready for batch testing and advanced features
 
-### 2F. Add Automated Testing and Performance Monitoring
+### 2F. Organize Analysis Scripts into Logical Subfolders ✅ COMPLETED
+
+**Sub-task 2F was successfully completed with the following key accomplishments:**
+
+1. **Directory Structure Reorganization**:
+
+   - Created `core/`, `tests/`, `data/`, and `docs/` subdirectories
+   - Added `__init__.py` files to make all directories proper Python packages
+   - Moved all files to their appropriate locations based on functionality
+
+2. **File Organization**:
+
+   - **Core Scripts** (`core/`): `model_registry.py`, `test_configs.py`, `model_comparison.py`, `batch_test_models.py`, `dashboard.py`, `generate_test_results.py`, `performance_analysis.py`, `organize_models.py`
+   - **Test Scripts** (`tests/`): All `test_*.py` files including new `test_reorganization.py`
+   - **Data Files** (`data/`): All CSV, JSON, and log files
+   - **Documentation** (`docs/`): All markdown files including `DASHBOARD.md` and new `REORGANIZATION_SUMMARY.md`
+
+3. **Import Statement Updates**:
+
+   - Updated all relative imports within `core/` to use relative imports (e.g., `from .model_registry import ModelRegistry`)
+   - Updated all test scripts to import from `scripts.analysis.core.*`
+   - Maintained compatibility with existing import patterns
+
+4. **File Path Updates**:
+
+   - Updated all file path references to point to the new `data/` directory
+   - Updated CSV file paths in dashboard, model comparison, and batch testing scripts
+   - Updated log file paths in batch testing scripts
+
+5. **Comprehensive Testing and Verification**:
+
+   - **✅ Verification Script**: Created `scripts/analysis/tests/test_reorganization.py` with 5 comprehensive test categories
+   - **✅ All Tests Pass**: 5/5 verification tests passed, confirming production-ready reorganization
+   - **✅ Directory Structure**: All expected directories and `__init__.py` files exist
+   - **✅ Core Imports**: All core modules import successfully from new locations
+   - **✅ Data Files**: All data files are accessible in new `data/` directory
+   - **✅ Core Functionality**: ModelRegistry and TestConfigManager work correctly
+   - **✅ File Paths**: All file paths updated correctly to point to new `data/` directory
+
+6. **Documentation and Support**:
+   - **✅ Reorganization Summary**: Created `scripts/analysis/docs/REORGANIZATION_SUMMARY.md` with complete documentation
+   - **✅ Usage Examples**: Provided clear examples for running scripts and importing modules
+   - **✅ Migration Notes**: Documented that no manual intervention is required
+   - **✅ Future Guidelines**: Established guidelines for adding new files to appropriate subdirectories
+
+**Key Implementation Challenges Encountered and Resolved:**
+
+1. **Import Path Management**: Multiple scripts had relative imports that needed updating
+
+   - **Problem**: `from model_registry import ModelRegistry` needed to be updated for new structure
+   - **Solution**: Updated all imports to use appropriate relative or absolute paths based on location
+   - **Result**: All imports work correctly from new directory structure
+
+2. **File Path References**: Many scripts referenced data files in the old location
+
+   - **Problem**: Hardcoded paths like `scripts/analysis/test_results_analysis.csv` were broken
+   - **Solution**: Updated all file path references to point to new `data/` directory
+   - **Result**: All scripts can find and access data files correctly
+
+3. **Package Structure**: Needed to ensure proper Python package structure
+
+   - **Problem**: Moving files could break Python package imports
+   - **Solution**: Added `__init__.py` files to all new directories and updated import statements
+   - **Result**: All modules can be imported correctly as Python packages
+
+4. **Testing Strategy**: Needed comprehensive verification of reorganization
+
+   - **Problem**: Multiple aspects needed testing (structure, imports, functionality, paths)
+   - **Solution**: Created comprehensive verification script covering all requirements
+   - **Result**: All verification tests pass, confirming robust reorganization
+
+**Impact on Task 2**: The analysis folder reorganization provides a clean, maintainable structure that will support future development and make the codebase easier to navigate and extend. The logical separation of concerns will improve developer productivity and reduce the likelihood of import or path-related issues.
+
+**Benefits Achieved**:
+
+- **Improved Organization**: Clear separation of concerns with logical grouping
+- **Reduced Clutter**: Main analysis directory is now much cleaner and easier to navigate
+- **Better Maintainability**: Easier to find and manage related files
+- **Scalability**: New files can be added to appropriate subdirectories
+- **Documentation**: Centralized documentation in `docs/` directory
+- **Robustness**: All functionality works correctly from new structure
+
+### 2G. Add Automated Testing and Performance Monitoring
 
 - Implement automated testing scheduler that monitors for new models and runs standard evaluation suites
 - Create performance regression detection that alerts when model performance degrades significantly
